@@ -382,12 +382,13 @@
 
   <div class="list" id="list"></div>
 
-  <footer>Tap the name to rename a habit &middot; misses a day, streak resets &middot; <span id="manageToggle" class="link">Manage habits</span></footer>
+  <footer>Tap the name to rename a habit &middot; misses a day, streak resets &middot; <span id="manageToggle" class="link">Manage habits</span> &middot; <span id="syncSettingsToggle" class="link">Sync</span> &middot; <span id="downloadData" class="link">Download data</span></footer>
 </div>
 
 <script>
 (function(){
   const STORAGE_KEY = 'habit-tracker-v1';
+  const SYNC_CONFIG_KEY = 'habit-tracker-sync-config';
   const DEFAULT_HABITS = [
     { id: 'h1', name: 'Move your body' },
     { id: 'h2', name: 'Read for 20 min' },
@@ -427,6 +428,76 @@
     }catch(e){
       console.error('Could not save habit data', e);
     }
+    syncPush();
+  }
+
+  // --- Cross-device sync (optional) -----------------------------------
+  // localStorage stays the source of truth for instant load/offline use;
+  // sync is a best-effort overlay on top. Last write wins -- if two
+  // devices are edited offline before either syncs, whichever pushes
+  // last overwrites the other. Fine for a single person's own habits.
+
+  function getSyncConfig(){
+    try{
+      return JSON.parse(localStorage.getItem(SYNC_CONFIG_KEY) || 'null');
+    }catch(e){
+      return null;
+    }
+  }
+
+  function setSyncConfig(cfg){
+    localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(cfg));
+  }
+
+  function promptSyncSettings(){
+    const existing = getSyncConfig() || { apiUrl: '', apiKey: '' };
+    const apiUrl = prompt('API URL (from `cdk deploy` output, e.g. https://xxxx.execute-api.us-east-1.amazonaws.com/api/state):', existing.apiUrl);
+    if(apiUrl === null) return;
+    const apiKey = prompt('API key (the /habittracker/api_key SSM value):', existing.apiKey);
+    if(apiKey === null) return;
+    if(!apiUrl.trim() || !apiKey.trim()){
+      localStorage.removeItem(SYNC_CONFIG_KEY);
+      alert('Sync disabled.');
+      return;
+    }
+    setSyncConfig({ apiUrl: apiUrl.trim(), apiKey: apiKey.trim() });
+    alert('Sync configured. Pulling latest synced data now...');
+    syncPull();
+  }
+
+  function syncPush(){
+    const cfg = getSyncConfig();
+    if(!cfg) return;
+    fetch(cfg.apiUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-habit-key': cfg.apiKey },
+      body: JSON.stringify(state)
+    }).catch((e) => console.error('Sync push failed', e));
+  }
+
+  function syncPull(){
+    const cfg = getSyncConfig();
+    if(!cfg) return;
+    fetch(cfg.apiUrl, { headers: { 'x-habit-key': cfg.apiKey } })
+      .then((res) => { if(!res.ok) throw new Error('sync pull HTTP ' + res.status); return res.json(); })
+      .then((remote) => {
+        if(remote && remote.habits && remote.completions){
+          state = remote;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          render();
+        }
+      })
+      .catch((e) => console.error('Sync pull failed', e));
+  }
+
+  function downloadData(){
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'habit-tracker-export-' + todayStr + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function calcStreak(habitId){
@@ -660,7 +731,11 @@
     render();
   });
 
+  document.getElementById('syncSettingsToggle').addEventListener('click', promptSyncSettings);
+  document.getElementById('downloadData').addEventListener('click', downloadData);
+
   loadState();
+  syncPull();
 
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('./sw.js').then((reg) => {

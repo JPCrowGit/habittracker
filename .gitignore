@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Python / CDK
+__pycache__/
+infra/.venv/
+infra/cdk.out/
+
+# Never commit secrets
+.env
+.env.*

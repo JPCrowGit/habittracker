@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `habit-tracker-${CACHE_VERSION}`;
 const APP_SHELL = [
   './',
